@@ -10,6 +10,13 @@ BLACK = (0, 0, 0)
 # GREEN = (0, 128, 0)
 FPS = 60
 
+DEEP_OCEAN = np.array([0, 30, 100])
+SHALLOW_OCEAN = np.array([0, 75, 150])
+BEACH = np.array([240, 240, 180])
+GRASS = np.array([34, 139, 34])
+MOUNTAIN = np.array([139, 69, 19])
+SNOW = np.array([250, 250, 250])
+
 
 pg.init()
 screen = pg.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -39,17 +46,33 @@ def apply_lighting(normal, light):
     light_dir = normalized(-light.direction)  
     normal = normalized(normal)
     light_power = np.dot(normal, light_dir) * light.intensity
-    return max(0.1, light_power)
+    return max(0.2, light_power)
 
 
-# def circle(display: pg.Surface, radius: int, position: np.array, color: tuple) -> None:
-#     for x in range(-radius, radius, 1):
-#         for y in range(-radius, radius, 1):
-#             if (x * x) + (y * y) <= radius * radius:
-#                 display.set_at((position[0] + x, position[1] + y), color)
+def lerp_color(color1, color2, t):
+    return color1 * (1 - t) + color2 * t
 
+
+def get_terrain_color(height):
+    if height < -0.1:  # Deep ocean
+        t = (-height - 0.1) / 0.9  # Normalize between -1 and -0.1
+        return lerp_color(SHALLOW_OCEAN, DEEP_OCEAN, t)
+    elif height < 0:  # Shallow ocean
+        t = -height / 0.1  # Normalize between -0.1 and 0
+        return lerp_color(BEACH, SHALLOW_OCEAN, t)
+    elif height < 0.1:  # Beach
+        t = height / 0.1  # Normalize between 0 and 0.1
+        return lerp_color(BEACH, GRASS, t)
+    elif height < 0.5:  # Grass to mountain
+        t = (height - 0.1) / 0.4  # Normalize between 0.1 and 0.5
+        return lerp_color(GRASS, MOUNTAIN, t)
+    else:  # Mountain to snow
+        t = (height - 0.5) / 0.5  # Normalize between 0.5 and 1
+        return lerp_color(MOUNTAIN, SNOW, t)
 
 def circle_normal_map(display: pg.Surface, radius: int, position: np.array, light: Light) -> None:
+    opensimplex.random_seed()
+
     for x in range(-radius, radius + 1):
         for y in range(-radius, radius + 1):
             if (x * x) + (y * y) <= radius * radius:
@@ -66,32 +89,35 @@ def circle_normal_map(display: pg.Surface, radius: int, position: np.array, ligh
                    continue
 
                 normal = normalized(normal)
-                
-                light_power = apply_lighting(normal, light)
-                
-                # normal map
-                # r = int((normal[0] + 1) * 127.5 * light_power) 
-                # g = int((normal[1] + 1) * 127.5 * light_power)
-                # b = int((normal[2] + 1) * 127.5 * light_power)
 
-                # r = max(0, min(255, r))
-                # g = max(0, min(255, g))
-                # b = max(0, min(255, b))
+                scale = 1.5
+                terrain_value = (
+                    opensimplex.noise3(normal[0] * scale, normal[1] * scale, normal[2] * scale) * 0.5 +
+                    opensimplex.noise3(normal[0] * scale * 2, normal[1] * scale * 2, normal[2] * scale * 2) * 0.25 +
+                    opensimplex.noise3(normal[0] * scale * 4, normal[1] * scale * 4, normal[2] * scale * 4) * 0.125 
+                )
+                
+                terrain_height = terrain_value
+                
+                terrain_normal = normal * (1 + terrain_height * 0.2)  
+                terrain_normal = normalized(terrain_normal)
 
-                # display.set_at((position[0] + x, position[1] + y), (r, g, b))
-                base_color = ((normal + 1) * 127.5).astype(int)
+                terrain_normal = normal * terrain_height
+                terrain_normal = normalized(terrain_normal)
+
+                light_power = apply_lighting(terrain_normal, light)
+                
+                base_color = get_terrain_color(terrain_height)
+                
                 color = (base_color * light_power).astype(int)
-                
                 color = np.clip(color, 0, 255)
 
                 display.set_at((position[0] + x, position[1] + y), tuple(color))
 
-# terrain_value = opensimplex.noise3(normal[0], normal[1], normal[2])
-
 running = True
 light = Light(direction=[1, 0, 0], intensity=1.0)
 angle = 0
-rotation_speed = 0.2
+rotation_speed = 0.5
 
 while running:
     for event in pg.event.get():
@@ -103,7 +129,7 @@ while running:
     light.update_direction(angle)
 
     center_position = np.array([SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2])
-    circle_normal_map(screen, 150, center_position, light)
+    circle_normal_map(screen, 200, center_position, light)
 
 
     pg.display.update()
